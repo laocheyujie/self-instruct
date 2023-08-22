@@ -210,23 +210,26 @@ if __name__ == "__main__":
                 data = json.loads(line)
                 task_clf_types[data["instruction"]] = data["is_classification"].strip() in ["Yes", "yes", "YES"]
 
+    # 使用tqdm模块，这是一个快速，可扩展的Python进度条，遍历生成的任务
     for task in tqdm.tqdm(generated_tasks):
         # get instruction
+        # 从任务中提取出指令
         instruction = task["instruction"]
+        # 根据指令判断任务是否为分类任务，并存储结果
         task["is_classification"] = task_clf_types[instruction]
-
-        # get the instances
+        # 根据任务类型，解析并获取对应的实例
         if task["is_classification"]:
             task_instances = parse_instances_for_classification_task(task["raw_instances"], instruction, task["instance_metadata"])
         else:
             task_instances = parse_instances_for_generation_task(task["raw_instances"], instruction, task["instance_metadata"])
 
         # we only allow max 5 instances per task
+        # 每个任务最多取5个实例，如果实例数少于5，则取全部
         task_instances = random.sample(task_instances, min(len(task_instances), 5))
-        
+        # 如果任务没有实例，则跳过当前循环
         if not task_instances:
             continue
-
+        # 将实例添加到训练实例列表中
         training_instances += task_instances
 
 
@@ -267,11 +270,13 @@ if __name__ == "__main__":
         print(f"Included {len(seed_tasks)} seed tasks")
 
     # get the prompt and completion for training gpt3
+    # 初始化GPT-3实例列表
     gpt3_instances = []
+    # 遍历训练实例
     for instance in training_instances:
-        # get input and do preprocessing
+        # 获取输入
         inst_input = instance[1]
-        # for some tasks, we check whether the input contains colon, and if so, we remove the part before the colon
+        # 对输入进行预处理，可能会去除冒号前的部分，或替换连续的两个新行符为一个新行符
         if random.random() < 0.5:
             colon_words = re.findall(r"(\w+):", inst_input)
             # if only one colon is found, we assume the instance only have one input and we remove the field name before the colon
@@ -281,23 +286,33 @@ if __name__ == "__main__":
                 inst_input = inst_input.strip()
             # we also replace two consecutive new lines with one new line half of the time
             inst_input = inst_input.replace("\n\n", "\n")
-        
+        # 对实例进行编码，并添加到GPT-3实例列表
         gpt3_instances.append(encode_instance(instance[0], inst_input, instance[2]))
 
     # remove duplicates
+    # 初始化过滤实例列表和实例集合，用于移除重复实例
     filtered_instances = []
     prompt_completion_set = set()
+    # 遍历GPT-3实例
     for instance in gpt3_instances:
+        # 创建实例对
         instance_pair = (instance["prompt"], instance["completion"])
+        # 如果实例对不在集合中，添加到集合和过滤实例列表中
         if instance_pair not in prompt_completion_set:
             prompt_completion_set.add((instance["prompt"], instance["completion"]))
             filtered_instances.append(instance)
+    # 使用过滤后的实例替换原来的GPT-3实例
     gpt3_instances = filtered_instances
 
     # shuffle
+    # 打乱GPT-3实例顺序
     random.shuffle(gpt3_instances)
+
+    # 打开文件，准备将GPT-3实例写入文件
     with open(os.path.join(args.output_dir, f"gpt3_finetuning_data_{len(gpt3_instances)}.jsonl"), "w") as fout:
+        # 遍历GPT-3实例
         for instance in gpt3_instances:
+            # 将实例转化为json格式并写入文件
             fout.write(json.dumps({
                 "prompt": instance["prompt"],
                 "completion": instance["completion"],

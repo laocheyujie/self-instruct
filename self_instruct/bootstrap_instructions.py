@@ -15,16 +15,28 @@ from gpt3_api import make_requests as make_gpt3_requests
 
 random.seed(42)
 
-
+# 构建prompt数据，针对是否分类分别构建不同的prompt数据
+# 定义一个函数，该函数用于将多个提示指令编码成一个字符串
+# 该函数接受两个参数，第一个参数是提示指令列表，第二个参数表示是否是分类任务，是=>输出优先，否=>输入优先，对应的 prompt_instructions/prompt_instances 不一样
 def encode_prompt(prompt_instructions, classification=False):
     """Encode multiple prompt instructions into a single string."""
+    # 如果当前任务是分类任务，那么设置提示信息为一个固定的字符串
     if classification:
-        prompt = "Come up with a series of classification tasks. Try to specify the possible output labels when possible.\n"
+        # 这个提示信息是引导用户生成一系列的分类任务，如果可能的话，要求用户明确指定可能的输出标签
+        # prompt = "Come up with a series of classification tasks. Try to specify the possible output labels when possible.\n"
+        prompt = "Referring to a series of classification tasks, generate 8 more new tasks. Try to specify the possible output labels when possible.\n"
+    # 如果当前任务不是分类任务，那么设置提示信息为另一个固定的字符串
     else:
-        prompt = "Come up with a series of tasks:\n"
+        # 这个提示信息是引导用户生成一系列的任务
+        # prompt = "Come up with a series of tasks:\n"
+        prompt = "Referring to these eight tasks, generate 8 more new tasks:\n"
+    # 循环处理每一条提示指令
     for idx, instruction in enumerate(prompt_instructions):
+        # 使用正则表达式将指令中的多余空格替换为单个空格，并去掉前后的空格以及末尾的冒号
         instruction = re.sub(r"\s+", " ", instruction).strip().rstrip(":")
+        # 将处理后的指令添加到提示信息中，注意指令前面需要添加序号
         prompt += f"{idx+1}. {instruction}\n"
+    # 在所有指令之后添加一个空白的序号，这个序号是接下来用户需要填写的新任务的序号
     prompt += f"{len(prompt_instructions) + 1}."
     return prompt
 
@@ -138,8 +150,9 @@ if __name__ == "__main__":
     
     os.makedirs(args.batch_dir, exist_ok=True)
     request_idx = 0
-    # load the LM-generated instructions
+    # load the LM-generated instructions，使用生成模型得到新的100条 instruction 提示
     machine_instructions = []
+    # 开始生成 100 条 instruction 提示数据
     if os.path.exists(os.path.join(args.batch_dir, "machine_generated_instructions.jsonl")):
         with open(os.path.join(args.batch_dir, "machine_generated_instructions.jsonl"), "r") as fin:
             for line in fin:
@@ -156,20 +169,34 @@ if __name__ == "__main__":
     if machine_instructions:
         progress_bar.update(len(machine_instructions))
 
+    # 开始生成100条instruction提示数据
+    # 使用文件操作打开一个文件，该文件位于指定的批处理目录中
+    # 文件名为"machine_generated_instructions.jsonl"，以追加模式打开，然后把文件对象赋值给fout
     with open(os.path.join(args.batch_dir, "machine_generated_instructions.jsonl"), "a") as fout:
+        # 进入循环，当生成模型产生的指令数量未达到用户指定的数量时，继续产生新的指令
         while len(machine_instructions) < args.num_instructions_to_generate:
+        # 初始化一个列表，用于保存批处理的输入数据
             batch_inputs = []
+            # args.request_batch_size 为 5
+            # 循环指定的批处理大小的次数，每次循环都会产生一条新的指令
             for _ in range(args.request_batch_size):
-                # sample machine instructions from the pool
+                # sample machine instructions from the pool（从生成模型中选，n表示最少的条数，这里为2）
+                # 调用函数从生成模型中抽样生成指令，这里选择的指令数量为2，然后将生成的指令保存到变量prompt_instructions
                 prompt_instructions = sample_machine_instructions(
                     machine_instructions, 
                     similarities=None,
                     n=2)
                 # sample human instructions from the pool
+                # 从默认的175条中选再选几条，相当于一共选了8条，其中从175条中选6条，使用LLM生成2条
+                # 最开始的时候，machine_instructions 为空，因此会直接从175条中直接选8条
                 prompt_instructions += random.sample(seed_instructions, args.num_prompt_instructions - len(prompt_instructions))
                 random.shuffle(prompt_instructions)
+                # 将这8条指令编码成模型可以接收的输入格式，然后保存到变量prompt
                 prompt = encode_prompt(prompt_instructions, classification=args.use_clf_seed_tasks_only)
+                # 将编码后的输入添加到批处理的输入数据列表中
                 batch_inputs.append(prompt)
+                
+            # 调用函数使用GPT-3引擎对批处理的输入数据进行处理，处理的参数包括最大的输出词汇数量、输出的随机性、输出结果的顶部概率等
             results = make_gpt3_requests(
                 engine=args.engine,
                 prompts=batch_inputs,
